@@ -96,3 +96,117 @@ Test logstash config using:
 ```
 sudo service logstash configtest
 ```
+
+## Setup rsyslog
+On ELK server:
+```
+sudo apt-get install rsyslog
+```
+
+Change config on rsyslog.config, and uncomment the lines
+```
+# provides UDP syslog reception
+$ModLoad imudp
+$UDPServerRun 514
+
+# provides TCP syslog reception
+$ModLoad imtcp
+$InputTCPServerRun 514
+```
+
+```
+sudo vim /etc/rsyslog.d/01-json-template.conf
+```
+And add
+```
+template(name="json-template"
+  type="list") {
+    constant(value="{")
+      constant(value="\"@timestamp\":\"")     property(name="timereported" dateFormat="rfc3339")
+      constant(value="\",\"@version\":\"1")
+      constant(value="\",\"message\":\"")     property(name="msg" format="json")
+      constant(value="\",\"sysloghost\":\"")  property(name="hostname")
+      constant(value="\",\"severity\":\"")    property(name="syslogseverity-text")
+      constant(value="\",\"facility\":\"")    property(name="syslogfacility-text")
+      constant(value="\",\"programname\":\"") property(name="programname")
+      constant(value="\",\"procid\":\"")      property(name="procid")
+    constant(value="\"}\n")
+}
+```
+
+```
+sudo vim etc/rsyslog.d/60-output.conf
+```
+And add
+```
+# This line sends all lines to defined IP address at port 10514,
+# using the "json-template" format template
+
+*.*                         @private_ip_logstash:10514;json-template
+```
+
+Restart the rsyslog service with:
+```
+sudo service rsyslog restart
+```
+
+```
+sudo vim /etc/logstash/conf.d/logstash.conf
+```
+And add
+```
+# This input block will listen on port 10514 for logs to come in.
+# host should be an IP on the Logstash server.
+# codec => "json" indicates that we expect the lines we're receiving to be in JSON format
+# type => "rsyslog" is an optional identifier to help identify messaging streams in the pipeline.
+
+input {
+  udp {
+    host => "logstash_private_ip"
+    port => 10514
+    codec => "json"
+    type => "rsyslog"
+  }
+}
+
+# This is an empty filter block.  You can later add other filters here to further process
+# your log lines
+
+filter { }
+
+# This output block will send all events of type "rsyslog" to Elasticsearch at the configured
+# host and port into daily indices of the pattern, "rsyslog-YYYY.MM.DD"
+
+output {
+  if [type] == "rsyslog" {
+    elasticsearch {
+      hosts => [ "elasticsearch_private_ip:9200" ]
+    }
+  }
+}
+```
+
+Test the configs using:
+```
+sudo service logstash configtest
+```
+Then
+```
+sudo service logstash restart
+sudo service rsyslog restart
+```
+
+In the client:
+```
+sudo vim /etc/rsyslog.d/50-default.conf
+```
+And add the following config:
+```
+*.*                         @private_ip_of_ryslog_server:514
+```
+Restart rsyslog
+```
+sudo service rsyslog restart
+```
+
+
