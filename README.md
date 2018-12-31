@@ -92,3 +92,7 @@ sudo service nginx restart
 ```
 sudo apt-get install logstash
 ```
+Test logstash config using:
+```
+sudo service logstash configtest
+```
