@@ -23,7 +23,7 @@ sudo vim /etc/elasticsearch/elasticsearch.yml
 ```
 Set the networkhost to localhost
 ```
-network.host: localhost
+network.host: "localhost"
 http.port:9200
 ```
 Restart elasticsearch
@@ -104,6 +104,7 @@ sudo apt-get install rsyslog
 ```
 
 Change config on rsyslog.config, and uncomment the lines
+sudo vim /etc/rsyslog.conf
 ```
 # provides UDP syslog reception
 $ModLoad imudp
