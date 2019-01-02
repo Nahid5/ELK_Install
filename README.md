@@ -1,19 +1,51 @@
 # Install instructions for ELK
 
-## Install Java 8
+## Install Java 8 and Elastic repo
 ```
-sudo add-apt-repository -y ppa:webupd8team/java
+sudo apt install software-properties-common apt-transport-https -y
+sudo add-apt-repository ppa:webupd8team/java -y
 sudo apt-get update
 sudo apt-get -y install oracle-java8-installer
 ```
 https://www.elastic.co/guide/en/elastic-stack/current/installing-elastic-stack.html
 
+Make sure java 8 is confured to use with:
+```
+update-alternatives --config java
+```
+
+Also add java.sh profile with:
+```
+vim /etc/profile.d/java.sh
+```
+
+And paste the following:
+```
+#Set JAVA_HOME
+JAVA_HOME="/usr/lib/jvm/java-8-oracle"
+export JAVA_HOME
+PATH=$PATH:$JAVA_HOME
+export PATH
+```
+
+And set it to execution with:
+```
+chmod +x /etc/profile.d/java.sh
+source /etc/profile.d/java.sh
+```
+
+Add the elastic repo with:
+```
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+echo "deb https://artifacts.elastic.co/packages/6.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-6.x.list
+```
+
+
+
+
 
 ## Install Elasticsearch
 ```
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-sudo apt-get install apt-transport-https
-echo "deb https://artifacts.elastic.co/packages/6.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-6.x.list
 sudo apt-get update && sudo apt-get install elasticsearch
 ```
 
@@ -23,22 +55,27 @@ sudo vim /etc/elasticsearch/elasticsearch.yml
 ```
 Set the networkhost to localhost
 ```
-network.host: "localhost"
+network.host: localhost
 http.port:9200
 ```
-Restart elasticsearch
+Restart elasticsearch and have it run at startup with:
 ```
-sudo service elasticsearch restart
+systemctl start elasticsearch
+systemctl enable elasticsearch
 ```
-Then run the following command to start Elasticsearch on boot up:
+
+You can test with:
 ```
-sudo update-rc.d elasticsearch defaults 95 10
+curl -XGET 'localhost:9200/?pretty'
 ```
+
+
 
 ## Install Kibana
 ```
 sudo apt-get install kibana
 ```
+
 ### Configure Kibana
 ```
 sudo vim /etc/kibana/kibana.yml
@@ -46,24 +83,30 @@ sudo vim /etc/kibana/kibana.yml
 And set
 ```
 server.port: 5601
+server.host: "localhost"
 elasticsearch.url: "http://localhost:9200"
 ```
 Now enable the Kibana service, and start it:
 ```
-sudo update-rc.d kibana defaults 96 9
-sudo service kibana start
+sudo systemctl enable kibana
+sudo systemctl start kibana
 ```
 
-# Install Nginx - Required to access Kibana from external hosts
+
+
+
+
+
+## Install Nginx - Required to access Kibana from external hosts
 ```
-sudo apt-get install nginx apache2-utils
+sudo apt install nginx apache2-utils -y
 sudo htpasswd -c /etc/nginx/htpasswd.users <SOME_USER_NAME>
 ```
-Edit the config:
+Add another config:
 ```
-sudo vim /etc/nginx/sites-available/default
+vim /etc/nginx/sites-available/kibana
 ```
-Replace everythign inside with this:
+And add this in it:
 ```
 server {
 	listen 80;
@@ -83,131 +126,72 @@ server {
 	}
 }
 ```
-Restart the Nginx server:
+
+Activate the kibana virtual host and test all configs with:
 ```
-sudo service nginx restart
+ln -s /etc/nginx/sites-available/kibana /etc/nginx/sites-enabled/
+nginx -t
 ```
+Restart and start nginx at startup with:
+```
+systemctl enable nginx
+systemctl restart nginx
+```
+
+
+
+## Generate SSL Certificates
+```
+sudo mkdir -p /etc/pki/tls/certs
+sudo mkdir /etc/pki/tls/private
+```
+If you dont have DNS setup:
+```
+sudo vi /etc/ssl/openssl.cnf
+```
+Find `[ v3_ca ]` and add the following under the line:
+```
+subjectAltName = IP: ELK_server_private_IP
+```
+
+Save and generate the SSLk certificate and private key with:
+```
+cd /etc/pki/tls
+sudo openssl req -config /etc/ssl/openssl.cnf -x509 -days 3650 -batch -nodes -newkey rsa:2048 -keyout private/logstash-forwarder.key -out certs/logstash-forwarder.crt
+```
+
+If you have FQDN (DNS)
+```
+cd /etc/pki/tls; sudo openssl req -subj '/CN=ENTER_ELK_FQDNS_HERE/' -x509 -days 3650 -batch -nodes -newkey rsa:2048 -keyout private/logstash-forwarder.key -out certs/logstash-forwarder.crt
+```
+The logstash-forwarder.crt will be distributed to all of the servers.
+
+
+
 
 ## Install Logstash
 ```
 sudo apt-get install logstash
 ```
-Test logstash config using:
-```
-sudo service logstash configtest
-```
 
-## Setup rsyslog
-On ELK server:
+Then in you server's /etc/logstash/conf.d/
+add the configuration for input, filter, and output
+The following is a template for the config (Note you can have differing files for the input, filter, and output)
 ```
-sudo apt-get install rsyslog
-```
-
-Change config on rsyslog.config, and uncomment the lines
-sudo vim /etc/rsyslog.conf
-```
-# provides UDP syslog reception
-$ModLoad imudp
-$UDPServerRun 514
-
-# provides TCP syslog reception
-$ModLoad imtcp
-$InputTCPServerRun 514
-```
-
-```
-sudo vim /etc/rsyslog.d/01-json-template.conf
-```
-And add
-```
-template(name="json-template"
-  type="list") {
-    constant(value="{")
-      constant(value="\"@timestamp\":\"")     property(name="timereported" dateFormat="rfc3339")
-      constant(value="\",\"@version\":\"1")
-      constant(value="\",\"message\":\"")     property(name="msg" format="json")
-      constant(value="\",\"sysloghost\":\"")  property(name="hostname")
-      constant(value="\",\"severity\":\"")    property(name="syslogseverity-text")
-      constant(value="\",\"facility\":\"")    property(name="syslogfacility-text")
-      constant(value="\",\"programname\":\"") property(name="programname")
-      constant(value="\",\"procid\":\"")      property(name="procid")
-    constant(value="\"}\n")
-}
-```
-
-```
-sudo vim etc/rsyslog.d/60-output.conf
-```
-And add
-```
-# This line sends all lines to defined IP address at port 10514,
-# using the "json-template" format template
-
-*.*                         @private_ip_logstash:10514;json-template
-```
-
-Restart the rsyslog service with:
-```
-sudo service rsyslog restart
-```
-
-```
-sudo vim /etc/logstash/conf.d/logstash.conf
-```
-And add
-```
-# This input block will listen on port 10514 for logs to come in.
-# host should be an IP on the Logstash server.
-# codec => "json" indicates that we expect the lines we're receiving to be in JSON format
-# type => "rsyslog" is an optional identifier to help identify messaging streams in the pipeline.
-
+# The # character at the beginning of a line indicates a comment. Use
+# comments to describe your configuration.
 input {
-  udp {
-    host => "logstash_private_ip"
-    port => 10514
-    codec => "json"
-    type => "rsyslog"
-  }
 }
-
-# This is an empty filter block.  You can later add other filters here to further process
-# your log lines
-
-filter { }
-
-# This output block will send all events of type "rsyslog" to Elasticsearch at the configured
-# host and port into daily indices of the pattern, "rsyslog-YYYY.MM.DD"
-
+# The filter part of this file is commented out to indicate that it is
+# optional.
+# filter {
+#
+# }
 output {
-  if [type] == "rsyslog" {
-    elasticsearch {
-      hosts => [ "elasticsearch_private_ip:9200" ]
-    }
-  }
 }
 ```
-
-Test the configs using:
+After you have your logstash settings restart and have it start at startup
 ```
-sudo service logstash configtest
+sudo systemctl enable logstash
+sudo systemctl start logstash
 ```
-Then
-```
-sudo service logstash restart
-sudo service rsyslog restart
-```
-
-In the client:
-```
-sudo vim /etc/rsyslog.d/50-default.conf
-```
-And add the following config:
-```
-*.*                         @private_ip_of_ryslog_server:514
-```
-Restart rsyslog
-```
-sudo service rsyslog restart
-```
-
-
