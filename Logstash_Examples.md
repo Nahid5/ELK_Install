@@ -6,8 +6,8 @@ input {
     port => 5443
     type => syslog
     ssl => true
-    ssl_certificate => "/etc/logstash/ssl/logstash-forwarder.crt"
-    ssl_key => "/etc/logstash/ssl/logstash-forwarder.key"
+    ssl_certificate => "/etc/pki/tls/certs/logstash-forwarder.crt"
+    ssl_key => "/etc/pki/tls/private/logstash-forwarder.key"
   }
 }
 filter {

@@ -147,7 +147,7 @@ sudo mkdir /etc/pki/tls/private
 ```
 If you dont have DNS setup:
 ```
-sudo vi /etc/ssl/openssl.cnf
+sudo vim /etc/ssl/openssl.cnf
 ```
 Find `[ v3_ca ]` and add the following under the line:
 ```
